@@ -1,15 +1,8 @@
 import { useState, useEffect } from "react";
 import type { Route } from "./+types/home";
+import { audioService, type AudioFile } from "~/services/api";
 
-interface AudioFile {
-  id: string;
-  fileName: string;
-  fileUrl: string;
-  summary: string;
-  uploadedAt: string;
-}
-
-export function meta({}: Route.MetaArgs) {
+export function meta({ }: Route.MetaArgs) {
   return [
     { title: "Audio Upload" },
     { name: "description", content: "Upload and manage audio files" },
@@ -23,17 +16,28 @@ export default function Home() {
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
 
+  const handleDownload = async (audio: AudioFile) => {
+    try {
+      const blob = await audioService.download(audio.id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = audio.fileName;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Erro ao baixar arquivo", error);
+    }
+  };
+
   useEffect(() => {
     fetchAudioFiles();
   }, []);
 
   const fetchAudioFiles = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/audio");
-      if (response.ok) {
-        const data = await response.json();
-        setAudioFiles(data);
-      }
+      const data = await audioService.getAll();
+      setAudioFiles(data);
     } catch (error) {
       console.error("Erro ao carregar arquivos", error);
     } finally {
@@ -50,7 +54,7 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!file) {
       setMessage("Por favor, selecione um arquivo de áudio");
       return;
@@ -60,24 +64,13 @@ export default function Home() {
     setMessage("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("http://localhost:5000/api/audio/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessage(`Upload concluído! Resumo: ${data.summary}`);
-        setFile(null);
-        (e.target as HTMLFormElement).reset();
-        fetchAudioFiles();
-      } else {
-        setMessage("Erro ao fazer upload do arquivo");
-      }
+      const data = await audioService.upload(file);
+      setMessage(`Upload concluído! Resumo: ${data.summary}`);
+      setFile(null);
+      (e.target as HTMLFormElement).reset();
+      fetchAudioFiles();
     } catch (error) {
+      console.error("Erro ao fazer upload", error);
       setMessage("Erro ao conectar com o servidor");
     } finally {
       setLoading(false);
@@ -149,11 +142,10 @@ export default function Home() {
 
           {message && (
             <div
-              className={`mt-4 p-4 rounded-md ${
-                message.includes("Erro")
-                  ? "bg-red-50 text-red-700"
-                  : "bg-green-50 text-green-700"
-              }`}
+              className={`mt-4 p-4 rounded-md ${message.includes("Erro")
+                ? "bg-red-50 text-red-700"
+                : "bg-green-50 text-green-700"
+                }`}
             >
               {message}
             </div>
@@ -211,14 +203,12 @@ export default function Home() {
                         Enviado em: {new Date(audio.uploadedAt).toLocaleString('pt-BR')}
                       </p>
                     </div>
-                    <a
-                      href={audio.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() => handleDownload(audio)}
                       className="ml-4 text-blue-600 hover:text-blue-800 text-sm font-medium"
                     >
                       Download
-                    </a>
+                    </button>
                   </div>
                 </div>
               ))}
