@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import type { Route } from "./+types/home";
 import { audioService, type AudioFile } from "~/services/api";
+import { AudioValidator } from "~/services/audioValidator";
+import { ACTIVE_DOMAIN } from "~/config/domain";
 
 export function meta({ }: Route.MetaArgs) {
   return [
@@ -12,6 +14,7 @@ export function meta({ }: Route.MetaArgs) {
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [message, setMessage] = useState("");
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
@@ -60,10 +63,22 @@ export default function Home() {
       return;
     }
 
-    setLoading(true);
-    setMessage("");
+    setValidating(true);
+    setMessage("Validando áudio...");
 
     try {
+      const validation = await AudioValidator.validate(file);
+
+      if (!validation.isValid) {
+        setMessage(`Validação falhou:\n${validation.errors.join("\n")}`);
+        setValidating(false);
+        return;
+      }
+
+      setMessage("Áudio validado! Enviando...");
+      setValidating(false);
+      setLoading(true);
+
       const data = await audioService.upload(file);
       setMessage(`Upload concluído! Resumo: ${data.summary}`);
       setFile(null);
@@ -74,6 +89,7 @@ export default function Home() {
       setMessage("Erro ao conectar com o servidor");
     } finally {
       setLoading(false);
+      setValidating(false);
     }
   };
 
@@ -82,8 +98,11 @@ export default function Home() {
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="bg-white rounded-lg shadow-md p-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">
-            Upload de Áudio
+            Upload de Áudio - {ACTIVE_DOMAIN.name}
           </h1>
+          <p className="text-sm text-gray-600 mb-6 text-center">
+            {ACTIVE_DOMAIN.description}
+          </p>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
@@ -107,10 +126,10 @@ export default function Home() {
 
             <button
               type="submit"
-              disabled={loading || !file}
+              disabled={loading || validating || !file}
               className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
             >
-              {loading ? (
+              {loading || validating ? (
                 <>
                   <svg
                     className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
@@ -132,7 +151,7 @@ export default function Home() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     ></path>
                   </svg>
-                  Enviando...
+                  {validating ? "Validando..." : "Enviando..."}
                 </>
               ) : (
                 "Enviar Áudio"
