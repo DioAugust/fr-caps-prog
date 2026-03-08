@@ -31,27 +31,78 @@ export class AudioValidator {
     hasVoice: boolean;
     hasInstruments: boolean;
   }> {
-    return new Promise((resolve) => {
-      const worker = new Worker(
-        new URL("../workers/audio-analyzer.worker.ts", import.meta.url),
-        { type: "module" }
-      );
-
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        worker.postMessage({
-          audioData: e.target?.result,
-          config: ACTIVE_DOMAIN.validations,
-        });
+      
+      reader.onload = async (e) => {
+        try {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const arrayBuffer = e.target?.result as ArrayBuffer;
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          
+          const channelData = audioBuffer.getChannelData(0);
+          
+          // Análise de features
+          const energy = this.calculateEnergy(channelData);
+          const zcr = this.calculateZCR(channelData);
+          const spectralVariance = this.calculateSpectralVariance(channelData);
+          
+          // Heurísticas para classificação
+          const hasMusic = energy > 0.01 && spectralVariance > 0.05;
+          const hasVoice = zcr > 0.1 && zcr < 0.3;
+          const hasInstruments = spectralVariance > 0.1 && energy > 0.02;
+          
+          resolve({ hasMusic, hasVoice, hasInstruments });
+        } catch (error) {
+          console.error("Erro ao decodificar áudio:", error);
+          reject(error);
+        }
       };
-
-      worker.onmessage = (e) => {
-        resolve(e.data);
-        worker.terminate();
-      };
-
+      
+      reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
       reader.readAsArrayBuffer(file);
     });
+  }
+
+  private static calculateEnergy(data: Float32Array): number {
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i] * data[i];
+    }
+    return sum / data.length;
+  }
+
+  private static calculateZCR(data: Float32Array): number {
+    let crossings = 0;
+    for (let i = 1; i < data.length; i++) {
+      if ((data[i] >= 0 && data[i - 1] < 0) || (data[i] < 0 && data[i - 1] >= 0)) {
+        crossings++;
+      }
+    }
+    return crossings / data.length;
+  }
+
+  private static calculateSpectralVariance(data: Float32Array): number {
+    const fftSize = 2048;
+    let variance = 0;
+    let count = 0;
+    
+    for (let i = 0; i < data.length - fftSize; i += fftSize) {
+      const slice = data.slice(i, i + fftSize);
+      const magnitude = this.calculateMagnitude(slice);
+      variance += magnitude;
+      count++;
+    }
+    
+    return count > 0 ? variance / count : 0;
+  }
+
+  private static calculateMagnitude(data: Float32Array): number {
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      sum += Math.abs(data[i]);
+    }
+    return sum / data.length;
   }
 
   static async validate(file: File): Promise<ValidationResult> {
@@ -112,6 +163,7 @@ export class AudioValidator {
       }
     } catch (error) {
       console.error("Erro na análise de features:", error);
+      // Não bloquear upload se análise falhar
     }
 
     return {

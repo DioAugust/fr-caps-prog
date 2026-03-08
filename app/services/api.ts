@@ -11,6 +11,9 @@ export interface AudioFile {
   fileUrl: string;
   summary: string;
   uploadedAt: string;
+  transcriptionReady?: boolean;
+  filteredFileUrl?: string;
+  filterType?: string;
 }
 
 export const audioService = {
@@ -28,6 +31,30 @@ export const audioService = {
 
   download: async (id: string): Promise<Blob> => {
     const { data } = await api.get(`/audio/download/${id}`, {
+      responseType: "blob",
+    });
+    return data;
+  },
+
+  downloadTranscription: async (id: string): Promise<Blob> => {
+    const { data } = await api.get(`/audio/download/transcription/${id}`, {
+      responseType: "blob",
+    });
+    return data;
+  },
+
+  getTranscriptionStatus: async (id: string): Promise<{ isReady: boolean; transcription: string }> => {
+    const { data } = await api.get(`/audio/transcription/status/${id}`);
+    return data;
+  },
+
+  applyFilter: async (id: string, filterType: string): Promise<any> => {
+    const { data } = await api.post(`/audio/filter/${id}`, { filterType });
+    return data;
+  },
+
+  downloadFilteredAudio: async (id: string): Promise<Blob> => {
+    const { data } = await api.get(`/audio/download/filtered/${id}`, {
       responseType: "blob",
     });
     return data;

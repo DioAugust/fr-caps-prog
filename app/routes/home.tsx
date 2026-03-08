@@ -18,6 +18,8 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
+  const [selectedFilter, setSelectedFilter] = useState<Record<string, string>>({});
+  const [isApplyingFilter, setIsApplyingFilter] = useState<string | null>(null);
 
   const handleDownload = async (audio: AudioFile) => {
     try {
@@ -33,6 +35,57 @@ export default function Home() {
     }
   };
 
+  const handleDownloadTranscription = async (audio: AudioFile) => {
+    try {
+      const blob = await audioService.downloadTranscription(audio.id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${audio.fileName.replace(/\.[^/.]+$/, "")}_transcription.txt`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error("Erro ao baixar transcrição", error);
+      if (error.response?.status === 400) {
+        setMessage("Transcrição não disponível para este áudio");
+      } else if (error.response?.status === 404) {
+        setMessage("Transcrição não encontrada");
+      } else {
+        setMessage("Erro ao baixar transcrição");
+      }
+    }
+  };
+
+  const handleApplyFilter = async (audioId: string) => {
+    try {
+      setIsApplyingFilter(audioId);
+      const filter = selectedFilter[audioId] || "bass";
+      await audioService.applyFilter(audioId, filter);
+      setMessage(`Filtro ${filter} aplicado com sucesso!`);
+      await fetchAudioFiles();
+    } catch (error) {
+      console.error("Erro ao aplicar filtro:", error);
+      setMessage("Erro ao aplicar filtro");
+    } finally {
+      setIsApplyingFilter(null);
+    }
+  };
+
+  const handleDownloadFiltered = async (audio: AudioFile) => {
+    try {
+      const blob = await audioService.downloadFilteredAudio(audio.id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = audio.fileName.replace(/\.[^/.]+$/, "") + "_filtered.mp3";
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Erro ao baixar áudio filtrado:", error);
+      setMessage("Erro ao baixar áudio filtrado");
+    }
+  };
+
   useEffect(() => {
     fetchAudioFiles();
   }, []);
@@ -40,7 +93,20 @@ export default function Home() {
   const fetchAudioFiles = async () => {
     try {
       const data = await audioService.getAll();
-      setAudioFiles(data);
+      
+      // Verificar status de transcrição para cada áudio
+      const filesWithStatus = await Promise.all(
+        data.map(async (audio) => {
+          try {
+            const status = await audioService.getTranscriptionStatus(audio.id);
+            return { ...audio, transcriptionReady: status.isReady };
+          } catch {
+            return { ...audio, transcriptionReady: false };
+          }
+        })
+      );
+      
+      setAudioFiles(filesWithStatus);
     } catch (error) {
       console.error("Erro ao carregar arquivos", error);
     } finally {
@@ -210,24 +276,87 @@ export default function Home() {
                   key={audio.id}
                   className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800 mb-1">
-                        {audio.fileName}
-                      </h3>
-                      <p className="text-sm text-gray-600 mb-2">
-                        <span className="font-medium">Resumo:</span> {audio.summary}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Enviado em: {new Date(audio.uploadedAt).toLocaleString('pt-BR')}
-                      </p>
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-gray-800 mb-1">
+                          {audio.fileName}
+                        </h3>
+                        <p className="text-sm text-gray-600 mb-2">
+                          <span className="font-medium">Resumo:</span> {audio.summary}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Enviado em: {new Date(audio.uploadedAt).toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleDownloadTranscription(audio)}
+                          disabled={!audio.transcriptionReady}
+                          className="text-green-600 hover:text-green-800 text-sm font-medium disabled:text-gray-400 disabled:cursor-not-allowed"
+                          title={audio.transcriptionReady ? "Baixar transcrição" : "Transcrição em processamento"}
+                        >
+                          Transcrição
+                        </button>
+                        <button
+                          onClick={() => handleDownload(audio)}
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          Áudio
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => handleDownload(audio)}
-                      className="ml-4 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      Download
-                    </button>
+
+                    {/* Preview de Áudio */}
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Áudio Original:</p>
+                        <audio controls className="w-full h-8">
+                          <source src={`http://localhost:5058/api/audio/download/${audio.id}`} type="audio/mpeg" />
+                        </audio>
+                      </div>
+                      
+                      {audio.filteredFileUrl && (
+                        <div>
+                          <p className="text-xs text-gray-600 mb-1">Áudio Filtrado ({audio.filterType}):</p>
+                          <audio controls className="w-full h-8">
+                            <source src={`http://localhost:5058/api/audio/download/filtered/${audio.id}`} type="audio/mpeg" />
+                          </audio>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Controles de Filtro */}
+                    <div className="flex items-center gap-2 pt-2 border-t">
+                      <select
+                        value={selectedFilter[audio.id] || "bass"}
+                        onChange={(e) => setSelectedFilter({ ...selectedFilter, [audio.id]: e.target.value })}
+                        className="text-sm border rounded px-2 py-1"
+                      >
+                        <option value="bass">Bass Boost</option>
+                        <option value="treble">Treble Boost</option>
+                        <option value="echo">Echo</option>
+                        <option value="reverb">Reverb</option>
+                        <option value="normalize">Normalize</option>
+                      </select>
+                      
+                      <button
+                        onClick={() => handleApplyFilter(audio.id)}
+                        disabled={isApplyingFilter === audio.id}
+                        className="text-sm bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700 disabled:bg-gray-400"
+                      >
+                        {isApplyingFilter === audio.id ? "Aplicando..." : "Aplicar Filtro"}
+                      </button>
+                      
+                      {audio.filteredFileUrl && (
+                        <button
+                          onClick={() => handleDownloadFiltered(audio)}
+                          className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700"
+                        >
+                          Baixar Filtrado
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
